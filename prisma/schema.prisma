@@ -33,19 +33,19 @@ model User {
 }
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String? @db.Text
+  access_token             String? @db.Text
+  expires_at               Int?
   refresh_token_expires_in Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
+  token_type               String?
+  scope                    String?
+  id_token                 String? @db.Text
+  session_state            String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -93,20 +93,30 @@ model Category {
 }
 
 model Chore {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   description String?
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   // free-text fields carried over from the original Dailies.xlsx sheet
-  frequency   String? // e.g. "once a week", "twice a week", "every 2 weeks"
-  bestDoneOn  String? // e.g. "sunday", "15th of every month"
-  remarks     String?
+  frequency  String? // e.g. "once a week", "twice a week", "every 2 weeks"
+  bestDoneOn String? // e.g. "sunday", "15th of every month"
+  remarks    String?
 
   durationMinutes Int? // how long the chore takes, in minutes
 
-  assignees ChoreAssignee[]
+  // Structured scheduling for the daily "Weekly schedule" view.
+  // Three-letter weekday codes: MON, TUE, WED, THU, FRI, SAT, SUN.
+  // Empty array = due every day. Ignored when `flexible` is true.
+  daysOfWeek String[] @default([])
+
+  // A "if there's time" chore: no fixed day, never carries over, just
+  // shown in its own flexible bucket until checked off.
+  flexible Boolean @default(false)
+
+  assignees   ChoreAssignee[]
+  completions ChoreCompletion[]
 
   createdById String?
   createdBy   User?   @relation("ChoreCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -126,4 +136,20 @@ model ChoreAssignee {
   person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
 
   @@unique([choreId, personId])
+}
+
+// Marks a chore as done on a specific calendar date (YYYY-MM-DD, stored as
+// plain text — see src/lib/date.ts for why this is date-only, not a real
+// DateTime). Presence of a row = done. A carried-over chore is "cleared"
+// by writing a completion against its *original* due date, not the date
+// it's currently showing up on.
+model ChoreCompletion {
+  id        String   @id @default(cuid())
+  choreId   String
+  date      String
+  createdAt DateTime @default(now())
+
+  chore Chore @relation(fields: [choreId], references: [id], onDelete: Cascade)
+
+  @@unique([choreId, date])
 }
