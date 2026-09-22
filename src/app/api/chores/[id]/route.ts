@@ -26,6 +26,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     personIds,
     daysOfWeek,
     flexible,
+    kind,
+    dueDate,
+    done,
   } = body as {
     name?: string;
     description?: string;
@@ -38,6 +41,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     personIds?: string[];
     daysOfWeek?: string[];
     flexible?: boolean;
+    kind?: "CHORE" | "ADMIN" | "MAINTENANCE";
+    dueDate?: string | null;
+    done?: boolean;
   };
 
   let resolvedCategoryId = categoryId;
@@ -78,6 +84,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
           durationMinutes === null ? null : durationMinutes !== undefined ? Number(durationMinutes) : undefined,
         daysOfWeek: daysOfWeek ?? undefined,
         flexible: flexible ?? undefined,
+        kind: kind ?? undefined,
+        dueDate: dueDate === null ? null : dueDate ?? undefined,
+        done: done ?? undefined,
       },
       include: { category: true, assignees: { include: { person: true } } },
     });
