@@ -92,12 +92,24 @@ model Category {
   createdAt DateTime @default(now())
 }
 
+// CHORE = the household chores board (daily/weekly rotation, carry-over,
+// "if there's time" flexible bucket). ADMIN = one-off administrative
+// to-dos with no fixed schedule. MAINTENANCE = occasional/monthly
+// date-specific upkeep (optionally tied to a `dueDate`).
+enum ChoreKind {
+  CHORE
+  ADMIN
+  MAINTENANCE
+}
+
 model Chore {
   id          String    @id @default(cuid())
   name        String
   description String?
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  kind ChoreKind @default(CHORE)
 
   // free-text fields carried over from the original Dailies.xlsx sheet
   frequency  String? // e.g. "once a week", "twice a week", "every 2 weeks"
@@ -109,11 +121,21 @@ model Chore {
   // Structured scheduling for the daily "Weekly schedule" view.
   // Three-letter weekday codes: MON, TUE, WED, THU, FRI, SAT, SUN.
   // Empty array = due every day. Ignored when `flexible` is true.
+  // Only meaningful for kind = CHORE.
   daysOfWeek String[] @default([])
 
   // A "if there's time" chore: no fixed day, never carries over, just
-  // shown in its own flexible bucket until checked off.
+  // shown inline in the chores list tagged "IF THERE'S TIME". Only
+  // meaningful for kind = CHORE.
   flexible Boolean @default(false)
+
+  // A specific calendar date (YYYY-MM-DD) this is due — used by
+  // kind = MAINTENANCE tasks that are date-specific rather than recurring.
+  dueDate String?
+
+  // Simple persistent checkbox for ADMIN / MAINTENANCE kinds, which
+  // aren't part of the daily rotation and so don't use ChoreCompletion.
+  done Boolean @default(false)
 
   assignees   ChoreAssignee[]
   completions ChoreCompletion[]
