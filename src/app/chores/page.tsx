@@ -48,6 +48,26 @@ function formatDuration(minutes: number | null) {
   return `${Number.isInteger(hrs) ? hrs : hrs.toFixed(1)} hr${hrs !== 1 ? "s" : ""}`;
 }
 
+// category pill colors — matches the household's original chores board
+const CATEGORY_STYLE: Record<string, string> = {
+  kitchen: "text-[#8A6D1B] bg-[#FBF0C2]",
+  plants: "text-[#3F7A4C] bg-[#DCEEDD]",
+  laundry: "text-[#8B6544] bg-[#EFE0D2]",
+  cats: "text-[#5B6B2E] bg-[#E4EAC6]",
+};
+function categoryStyle(name: string) {
+  return CATEGORY_STYLE[name.toLowerCase()] ?? "text-brand-500 bg-brand-100";
+}
+
+// owner badge colors — named household members get their own color, anyone
+// else (or multiple people) falls back to a neutral amber tag
+function personStyle(name: string) {
+  const n = name.toLowerCase();
+  if (n === "tricia") return "text-tricia bg-tricia-soft";
+  if (n === "zane") return "text-zane bg-zane-soft";
+  return "text-flag bg-flag-soft";
+}
+
 export default function ChoresPage() {
   const [chores, setChores] = useState<Chore[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -195,52 +215,54 @@ export default function ChoresPage() {
         </div>
       </div>
 
-      {loading && <p className="text-brand-500">Loading…</p>}
+      {loading && <p className="mono text-sm text-brand-500">Loading…</p>}
 
       {!loading &&
         Array.from(grouped.entries()).map(([categoryName, categoryChores]) => (
-          <div key={categoryName} className="space-y-2">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-500">{categoryName}</h2>
+          <div key={categoryName} className="space-y-3">
+            <span className={`mono inline-block text-[11px] tracking-wide uppercase px-2.5 py-1 rounded-md ${categoryStyle(categoryName)}`}>
+              {categoryName}
+            </span>
             <div className="grid sm:grid-cols-2 gap-3">
               {categoryChores.map((chore) => (
-                <div key={chore.id} className="rounded-xl border border-brand-100 bg-white p-4 shadow-sm">
+                <div key={chore.id} className="rounded-2xl border border-brand-200 bg-white p-5 flex flex-col gap-3">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="font-semibold text-brand-900">{chore.name}</h3>
-                    <div className="flex gap-1 shrink-0">
+                    <div className="flex gap-1.5 shrink-0 mono text-[11px]">
                       <button
                         onClick={() => openEditForm(chore)}
-                        className="text-xs text-brand-600 hover:underline"
+                        className="text-brand-500 hover:text-brand-800"
                       >
                         Edit
                       </button>
                       <span className="text-brand-200">|</span>
                       <button
                         onClick={() => deleteChore(chore.id)}
-                        className="text-xs text-red-500 hover:underline"
+                        className="text-tricia hover:opacity-80"
                       >
                         Delete
                       </button>
                     </div>
                   </div>
-                  {chore.description && <p className="text-sm text-brand-600 mt-1">{chore.description}</p>}
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-brand-500">
-                    {chore.frequency && <span>🔁 {chore.frequency}</span>}
-                    <span>⏱ {formatDuration(chore.durationMinutes)}</span>
-                    {chore.bestDoneOn && <span>📆 {chore.bestDoneOn}</span>}
+                  {chore.description && <p className="text-sm text-brand-500 -mt-1">{chore.description}</p>}
+                  <div className="mono flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-brand-500">
+                    {chore.frequency && <span>{chore.frequency}</span>}
+                    <span>{formatDuration(chore.durationMinutes)}</span>
+                    {chore.bestDoneOn && <span>{chore.bestDoneOn}</span>}
                   </div>
                   {chore.assignees.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-3">
+                    <div className="flex flex-wrap gap-1.5">
                       {chore.assignees.map((a) => (
                         <span
                           key={a.person.id}
-                          className="text-xs rounded-full bg-brand-100 text-brand-800 px-2 py-0.5"
+                          className={`mono text-[11.5px] tracking-wide uppercase rounded-md px-2.5 py-1 ${personStyle(a.person.name)}`}
                         >
                           {a.person.name}
                         </span>
                       ))}
                     </div>
                   )}
-                  {chore.remarks && <p className="text-xs text-brand-400 mt-2 italic">{chore.remarks}</p>}
+                  {chore.remarks && <p className="text-xs text-brand-400 italic">{chore.remarks}</p>}
                 </div>
               ))}
             </div>
