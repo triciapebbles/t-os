@@ -67,7 +67,7 @@ async function loadChores() {
 
 function shapeChore(
   chore: ChoreWithRelations,
-  extra: { carriedOver: boolean; originalDate?: string; completed: boolean }
+  extra: { carriedOver: boolean; flexible: boolean; originalDate?: string; completed: boolean }
 ) {
   return {
     id: chore.id,
@@ -77,6 +77,19 @@ function shapeChore(
     durationMinutes: chore.durationMinutes,
     assignees: chore.assignees.map((a) => ({ id: a.person.id, name: a.person.name })),
     ...extra,
+  };
+}
+
+function shapeSimpleTask(chore: ChoreWithRelations) {
+  return {
+    id: chore.id,
+    name: chore.name,
+    description: chore.description,
+    categoryName: chore.category?.name ?? null,
+    durationMinutes: chore.durationMinutes,
+    assignees: chore.assignees.map((a) => ({ id: a.person.id, name: a.person.name })),
+    dueDate: chore.dueDate,
+    done: chore.done,
   };
 }
 
@@ -149,6 +162,7 @@ export async function GET(request: Request) {
 
   // ---------- chores, with carry-over ----------
   const allChores = await loadChores();
+  const dailyChores = allChores.filter((c) => c.kind === "CHORE");
   const completions = await prisma.choreCompletion.findMany({
     where: { date: { in: weekDates } },
   });
@@ -158,12 +172,12 @@ export async function GET(request: Request) {
   const due: ReturnType<typeof shapeChore>[] = [];
   const seen = new Set<string>();
 
-  for (const chore of allChores) {
+  for (const chore of dailyChores) {
     if (chore.flexible) continue;
     const scheduled = chore.daysOfWeek.length === 0 || chore.daysOfWeek.includes(todayCode);
     if (!scheduled) continue;
     const completed = completedSet.has(`${chore.id}:${dateStr}`);
-    due.push(shapeChore(chore, { carriedOver: false, completed }));
+    due.push(shapeChore(chore, { carriedOver: false, flexible: false, completed }));
     seen.add(chore.id);
   }
 
@@ -174,21 +188,26 @@ export async function GET(request: Request) {
     const key = formatDateOnly(d);
     if (key >= dateStr) break;
     const code = weekdayCodeUTC(d);
-    for (const chore of allChores) {
+    for (const chore of dailyChores) {
       if (chore.flexible || seen.has(chore.id)) continue;
       const scheduled = chore.daysOfWeek.length === 0 || chore.daysOfWeek.includes(code);
       if (!scheduled) continue;
       if (completedSet.has(`${chore.id}:${key}`)) continue;
-      due.push(shapeChore(chore, { carriedOver: true, originalDate: key, completed: false }));
+      due.push(shapeChore(chore, { carriedOver: true, flexible: false, originalDate: key, completed: false }));
       seen.add(chore.id);
     }
   }
 
-  const flexible = allChores
-    .filter((c) => c.flexible)
-    .map((chore) =>
-      shapeChore(chore, { carriedOver: false, completed: completedSet.has(`${chore.id}:${dateStr}`) })
-    );
+  // Flexible ("if there's time") chores are shown inline in the same list,
+  // every day, tagged instead of split into their own section.
+  for (const chore of dailyChores) {
+    if (!chore.flexible) continue;
+    const completed = completedSet.has(`${chore.id}:${dateStr}`);
+    due.push(shapeChore(chore, { carriedOver: false, flexible: true, completed }));
+  }
+
+  const admin = allChores.filter((c) => c.kind === "ADMIN").map(shapeSimpleTask);
+  const maintenance = allChores.filter((c) => c.kind === "MAINTENANCE").map(shapeSimpleTask);
 
   return NextResponse.json({
     date: dateStr,
@@ -196,6 +215,8 @@ export async function GET(request: Request) {
     eventColumns,
     eventCount: todaysEvents.length,
     calendarError,
-    chores: { due, flexible },
+    chores: { due },
+    admin,
+    maintenance,
   });
 }

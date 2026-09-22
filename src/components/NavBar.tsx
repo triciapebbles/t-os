@@ -39,15 +39,13 @@ export default function NavBar() {
         </span>
       </nav>
 
-      <div className="flex items-center gap-2">
-        <span className="mono text-sm rounded-full px-4 py-2 border border-brand-200 bg-white text-brand-700">
-          {now ? format(now, "EEEE, d MMMM") : " "}
-        </span>
-        <span className="mono text-sm rounded-full px-4 py-2 border border-brand-200 bg-white text-brand-700">
-          {now ? `${format(now, "h:mm a")} ${offsetLabel}` : " "}
+      <div className="flex items-center gap-3">
+        <span className="mono text-sm text-brand-700">{now ? format(now, "EEEE, d MMMM") : ""}</span>
+        <span className="mono text-sm text-brand-700">
+          {now ? `${format(now, "h:mm a")} ${offsetLabel}` : ""}
         </span>
         <span className="text-xl leading-none" aria-hidden>
-          🌱
+          🥬
         </span>
       </div>
     </div>

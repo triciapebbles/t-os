@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+type Kind = "CHORE" | "ADMIN" | "MAINTENANCE";
+
 type Person = { id: string; name: string; color: string | null };
 type Category = { id: string; name: string; color: string | null };
 type Chore = {
@@ -16,6 +18,9 @@ type Chore = {
   durationMinutes: number | null;
   daysOfWeek: string[];
   flexible: boolean;
+  kind: Kind;
+  dueDate: string | null;
+  done: boolean;
   assignees: { person: Person }[];
 };
 
@@ -32,6 +37,8 @@ type FormState = {
   personIds: string[];
   daysOfWeek: string[];
   flexible: boolean;
+  kind: Kind;
+  dueDate: string;
 };
 
 const emptyForm: FormState = {
@@ -46,6 +53,8 @@ const emptyForm: FormState = {
   personIds: [],
   daysOfWeek: [],
   flexible: false,
+  kind: "CHORE",
+  dueDate: "",
 };
 
 const WEEKDAYS: { code: string; label: string }[] = [
@@ -58,6 +67,12 @@ const WEEKDAYS: { code: string; label: string }[] = [
   { code: "SUN", label: "Sun" },
 ];
 
+const KIND_TABS: { kind: Kind; label: string }[] = [
+  { kind: "CHORE", label: "Chores" },
+  { kind: "ADMIN", label: "Admin" },
+  { kind: "MAINTENANCE", label: "Maintenance" },
+];
+
 function formatDuration(minutes: number | null) {
   if (!minutes) return "—";
   if (minutes < 60) return `${minutes} min`;
@@ -65,7 +80,9 @@ function formatDuration(minutes: number | null) {
   return `${Number.isInteger(hrs) ? hrs : hrs.toFixed(1)} hr${hrs !== 1 ? "s" : ""}`;
 }
 
-function scheduleLabel(chore: Pick<Chore, "flexible" | "daysOfWeek">) {
+function scheduleLabel(chore: Pick<Chore, "flexible" | "daysOfWeek" | "kind" | "dueDate">) {
+  if (chore.kind === "ADMIN") return "Admin task";
+  if (chore.kind === "MAINTENANCE") return chore.dueDate ? `Due ${chore.dueDate}` : "No fixed date";
   if (chore.flexible) return "If there's time";
   if (chore.daysOfWeek.length === 0) return "Daily";
   return chore.daysOfWeek
@@ -99,6 +116,7 @@ export default function ChoresPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
+  const [kindFilter, setKindFilter] = useState<Kind>("CHORE");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [newPersonName, setNewPersonName] = useState("");
 
@@ -120,18 +138,19 @@ export default function ChoresPage() {
   }, []);
 
   const grouped = useMemo(() => {
+    const byKind = chores.filter((c) => c.kind === kindFilter);
     const filtered =
-      categoryFilter === "all" ? chores : chores.filter((c) => c.category?.id === categoryFilter);
+      categoryFilter === "all" ? byKind : byKind.filter((c) => c.category?.id === categoryFilter);
     const byCategory = new Map<string, Chore[]>();
     for (const chore of filtered) {
       const key = chore.category?.name ?? "uncategorized";
       byCategory.set(key, [...(byCategory.get(key) ?? []), chore]);
     }
     return byCategory;
-  }, [chores, categoryFilter]);
+  }, [chores, categoryFilter, kindFilter]);
 
   function openNewForm() {
-    setForm({ ...emptyForm });
+    setForm({ ...emptyForm, kind: kindFilter });
   }
 
   function openEditForm(chore: Chore) {
@@ -148,6 +167,8 @@ export default function ChoresPage() {
       personIds: chore.assignees.map((a) => a.person.id),
       daysOfWeek: chore.daysOfWeek,
       flexible: chore.flexible,
+      kind: chore.kind,
+      dueDate: chore.dueDate ?? "",
     });
   }
 
@@ -165,8 +186,10 @@ export default function ChoresPage() {
       remarks: form.remarks || undefined,
       durationMinutes: form.durationMinutes ? Number(form.durationMinutes) : undefined,
       personIds: form.personIds,
-      daysOfWeek: form.flexible ? [] : form.daysOfWeek,
-      flexible: form.flexible,
+      kind: form.kind,
+      daysOfWeek: form.kind === "CHORE" && !form.flexible ? form.daysOfWeek : [],
+      flexible: form.kind === "CHORE" ? form.flexible : false,
+      dueDate: form.kind === "MAINTENANCE" ? form.dueDate || null : null,
     };
 
     if (form.id) {
@@ -188,7 +211,7 @@ export default function ChoresPage() {
   }
 
   async function deleteChore(id: string) {
-    if (!confirm("Delete this chore?")) return;
+    if (!confirm("Delete this?")) return;
     await fetch(`/api/chores/${id}`, { method: "DELETE" });
     loadAll();
   }
@@ -254,9 +277,25 @@ export default function ChoresPage() {
             onClick={openNewForm}
             className="rounded-md bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700"
           >
-            + Add chore
+            + Add
           </button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {KIND_TABS.map((tab) => (
+          <button
+            key={tab.kind}
+            onClick={() => setKindFilter(tab.kind)}
+            className={`mono text-sm rounded-full px-4 py-1.5 border ${
+              kindFilter === tab.kind
+                ? "bg-brand-900 border-brand-900 text-white"
+                : "bg-white border-brand-200 text-brand-700 hover:border-brand-400"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {loading && <p className="mono text-sm text-brand-500">Loading…</p>}
@@ -314,7 +353,7 @@ export default function ChoresPage() {
         ))}
 
       {!loading && grouped.size === 0 && (
-        <p className="text-brand-400 text-sm">No chores yet — add your first one above.</p>
+        <p className="text-brand-400 text-sm">Nothing here yet — add the first one above.</p>
       )}
 
       {form && (
@@ -323,7 +362,27 @@ export default function ChoresPage() {
             onSubmit={submitForm}
             className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
           >
-            <h2 className="text-lg font-semibold text-brand-900">{form.id ? "Edit chore" : "New chore"}</h2>
+            <h2 className="text-lg font-semibold text-brand-900">{form.id ? "Edit" : "New"}</h2>
+
+            <div>
+              <label className="text-sm font-medium text-brand-700">Type</label>
+              <div className="flex gap-1.5 mt-1">
+                {KIND_TABS.map((tab) => (
+                  <button
+                    type="button"
+                    key={tab.kind}
+                    onClick={() => setForm({ ...form, kind: tab.kind })}
+                    className={`mono text-xs rounded-full px-3 py-1 border ${
+                      form.kind === tab.kind
+                        ? "bg-brand-600 text-white border-brand-600"
+                        : "bg-white text-brand-700 border-brand-300"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div>
               <label className="text-sm font-medium text-brand-700">Name</label>
@@ -381,40 +440,57 @@ export default function ChoresPage() {
               </div>
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-brand-700">When is this due?</label>
-              <label className="mt-1 flex items-center gap-2 text-sm text-brand-600">
+            {form.kind === "CHORE" && (
+              <div>
+                <label className="text-sm font-medium text-brand-700">When is this due?</label>
+                <label className="mt-1 flex items-center gap-2 text-sm text-brand-600">
+                  <input
+                    type="checkbox"
+                    checked={form.flexible}
+                    onChange={(e) => setForm({ ...form, flexible: e.target.checked })}
+                  />
+                  Flexible — &quot;if there&apos;s time&quot;, no fixed day
+                </label>
+                {!form.flexible && (
+                  <>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {WEEKDAYS.map((day) => (
+                        <button
+                          type="button"
+                          key={day.code}
+                          onClick={() => toggleDay(day.code)}
+                          className={`mono text-xs rounded-full px-3 py-1 border ${
+                            form.daysOfWeek.includes(day.code)
+                              ? "bg-brand-600 text-white border-brand-600"
+                              : "bg-white text-brand-700 border-brand-300"
+                          }`}
+                        >
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-brand-400 mt-1">
+                      Leave all days unselected for a chore that&apos;s due every day.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {form.kind === "MAINTENANCE" && (
+              <div>
+                <label className="text-sm font-medium text-brand-700">Due date (optional)</label>
                 <input
-                  type="checkbox"
-                  checked={form.flexible}
-                  onChange={(e) => setForm({ ...form, flexible: e.target.checked })}
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-brand-300 px-3 py-1.5 text-sm"
                 />
-                Flexible — &quot;if there&apos;s time&quot;, no fixed day
-              </label>
-              {!form.flexible && (
-                <>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {WEEKDAYS.map((day) => (
-                      <button
-                        type="button"
-                        key={day.code}
-                        onClick={() => toggleDay(day.code)}
-                        className={`mono text-xs rounded-full px-3 py-1 border ${
-                          form.daysOfWeek.includes(day.code)
-                            ? "bg-brand-600 text-white border-brand-600"
-                            : "bg-white text-brand-700 border-brand-300"
-                        }`}
-                      >
-                        {day.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-brand-400 mt-1">
-                    Leave all days unselected for a chore that&apos;s due every day.
-                  </p>
-                </>
-              )}
-            </div>
+                <p className="text-xs text-brand-400 mt-1">
+                  Leave blank for maintenance with no specific date yet.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -493,7 +569,7 @@ export default function ChoresPage() {
                 type="submit"
                 className="rounded-md bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700"
               >
-                {form.id ? "Save changes" : "Create chore"}
+                {form.id ? "Save changes" : "Create"}
               </button>
             </div>
           </form>

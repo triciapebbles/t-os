@@ -41,6 +41,8 @@ export async function POST(request: Request) {
     personIds,
     daysOfWeek,
     flexible,
+    kind,
+    dueDate,
   } = body as {
     name: string;
     description?: string;
@@ -53,6 +55,8 @@ export async function POST(request: Request) {
     personIds?: string[];
     daysOfWeek?: string[];
     flexible?: boolean;
+    kind?: "CHORE" | "ADMIN" | "MAINTENANCE";
+    dueDate?: string | null;
   };
 
   if (!name || typeof name !== "string") {
@@ -82,6 +86,8 @@ export async function POST(request: Request) {
       durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
       daysOfWeek: daysOfWeek ?? [],
       flexible: flexible ?? false,
+      kind: kind ?? "CHORE",
+      dueDate: dueDate || undefined,
       createdById: userId,
       assignees: {
         create: (personIds ?? []).map((personId) => ({ personId })),

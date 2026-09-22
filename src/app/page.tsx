@@ -23,8 +23,19 @@ type ChoreItem = {
   durationMinutes: number | null;
   assignees: { id: string; name: string }[];
   carriedOver: boolean;
+  flexible: boolean;
   originalDate?: string;
   completed: boolean;
+};
+type SimpleTask = {
+  id: string;
+  name: string;
+  description: string | null;
+  categoryName: string | null;
+  durationMinutes: number | null;
+  assignees: { id: string; name: string }[];
+  dueDate: string | null;
+  done: boolean;
 };
 type EventColumn = { owner: string; events: CalEvent[] };
 type DailyData = {
@@ -33,7 +44,9 @@ type DailyData = {
   eventColumns: EventColumn[];
   eventCount: number;
   calendarError: string | null;
-  chores: { due: ChoreItem[]; flexible: ChoreItem[] };
+  chores: { due: ChoreItem[] };
+  admin: SimpleTask[];
+  maintenance: SimpleTask[];
 };
 
 function todayStr() {
@@ -69,7 +82,7 @@ export default function HomePage() {
   const [data, setData] = useState<DailyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busyChoreId, setBusyChoreId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const today = useMemo(() => todayStr(), []);
@@ -95,7 +108,7 @@ export default function HomePage() {
   }, [selectedDate]);
 
   async function toggleChore(item: ChoreItem) {
-    setBusyChoreId(item.id);
+    setBusyId(item.id);
     const date = item.carriedOver ? item.originalDate! : selectedDate;
     try {
       await fetch("/api/chores/complete", {
@@ -105,7 +118,21 @@ export default function HomePage() {
       });
       await load(selectedDate);
     } finally {
-      setBusyChoreId(null);
+      setBusyId(null);
+    }
+  }
+
+  async function toggleTask(item: SimpleTask) {
+    setBusyId(item.id);
+    try {
+      await fetch(`/api/chores/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done: !item.done }),
+      });
+      await load(selectedDate);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -207,7 +234,7 @@ export default function HomePage() {
             <div key={`${item.id}-${item.carriedOver ? item.originalDate : "today"}`} className="flex items-center gap-3 py-3">
               <button
                 onClick={() => toggleChore(item)}
-                disabled={busyChoreId === item.id}
+                disabled={busyId === item.id}
                 className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
                   item.completed ? "bg-done border-done text-white" : "border-brand-300 bg-white"
                 }`}
@@ -221,6 +248,11 @@ export default function HomePage() {
               {item.carriedOver && (
                 <span className="mono text-[10px] tracking-wide uppercase rounded-full border border-flag text-flag px-2 py-0.5">
                   Carried over
+                </span>
+              )}
+              {item.flexible && (
+                <span className="mono text-[10px] tracking-wide uppercase rounded-full bg-brand-700 text-white px-2 py-0.5">
+                  If there&apos;s time
                 </span>
               )}
               {item.description && <span className="text-sm text-brand-400 truncate">{item.description}</span>}
@@ -247,52 +279,100 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-brand-200 bg-white p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-brand-900">If there&apos;s time</h2>
-          <span className="mono text-xs text-brand-400">flexible — slot in when convenient</span>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="rounded-3xl border border-brand-200 bg-white p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-brand-900">Admin</h2>
+            {data && <span className="mono text-sm text-brand-400">{data.admin.length}</span>}
+          </div>
+          <div className="divide-y divide-brand-100">
+            {!loading && data?.admin.length === 0 && (
+              <p className="text-sm text-brand-400 py-3">Nothing here.</p>
+            )}
+            {data?.admin.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 py-3">
+                <button
+                  onClick={() => toggleTask(item)}
+                  disabled={busyId === item.id}
+                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
+                    item.done ? "bg-done border-done text-white" : "border-brand-300 bg-white"
+                  }`}
+                  aria-label={item.done ? "Mark not done" : "Mark done"}
+                >
+                  {item.done && "✓"}
+                </button>
+                <span className={`font-semibold ${item.done ? "line-through text-brand-400" : "text-brand-900"}`}>
+                  {item.name}
+                </span>
+                {item.description && <span className="text-sm text-brand-400 truncate">{item.description}</span>}
+                <div className="ml-auto flex items-center gap-2 shrink-0">
+                  {item.categoryName && (
+                    <span className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${categoryStyle(item.categoryName)}`}>
+                      {item.categoryName}
+                    </span>
+                  )}
+                  {item.assignees.map((a) => (
+                    <span
+                      key={a.id}
+                      className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${personStyle(a.name)}`}
+                    >
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="divide-y divide-brand-100">
-          {!loading && data?.chores.flexible.length === 0 && (
-            <p className="text-sm text-brand-400 py-3">No additional chores here.</p>
-          )}
-          {data?.chores.flexible.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 py-3">
-              <button
-                onClick={() => toggleChore(item)}
-                disabled={busyChoreId === item.id}
-                className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
-                  item.completed ? "bg-done border-done text-white" : "border-brand-300 bg-white"
-                }`}
-                aria-label={item.completed ? "Mark not done" : "Mark done"}
-              >
-                {item.completed && "✓"}
-              </button>
-              <span className={`font-semibold ${item.completed ? "line-through text-brand-400" : "text-brand-900"}`}>
-                {item.name}
-              </span>
-              {item.description && <span className="text-sm text-brand-400 truncate">{item.description}</span>}
-              <div className="ml-auto flex items-center gap-2 shrink-0">
-                {item.categoryName && (
-                  <span className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${categoryStyle(item.categoryName)}`}>
-                    {item.categoryName}
+        <div className="rounded-3xl border border-brand-200 bg-white p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-brand-900">Maintenance Needed</h2>
+            {data && <span className="mono text-sm text-brand-400">{data.maintenance.length}</span>}
+          </div>
+          <div className="divide-y divide-brand-100">
+            {!loading && data?.maintenance.length === 0 && (
+              <p className="text-sm text-brand-400 py-3">Nothing here.</p>
+            )}
+            {data?.maintenance.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 py-3">
+                <button
+                  onClick={() => toggleTask(item)}
+                  disabled={busyId === item.id}
+                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
+                    item.done ? "bg-done border-done text-white" : "border-brand-300 bg-white"
+                  }`}
+                  aria-label={item.done ? "Mark not done" : "Mark done"}
+                >
+                  {item.done && "✓"}
+                </button>
+                <span className={`font-semibold ${item.done ? "line-through text-brand-400" : "text-brand-900"}`}>
+                  {item.name}
+                </span>
+                {item.dueDate && (
+                  <span className="mono text-[11px] text-brand-400">
+                    Due {format(parseISO(item.dueDate), "MMM d")}
                   </span>
                 )}
-                {item.assignees.map((a) => (
-                  <span
-                    key={a.id}
-                    className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${personStyle(a.name)}`}
-                  >
-                    {a.name}
-                  </span>
-                ))}
-                <span className="mono text-xs text-brand-400 w-12 text-right">
-                  {formatDuration(item.durationMinutes)}
-                </span>
+                {item.description && <span className="text-sm text-brand-400 truncate">{item.description}</span>}
+                <div className="ml-auto flex items-center gap-2 shrink-0">
+                  {item.categoryName && (
+                    <span className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${categoryStyle(item.categoryName)}`}>
+                      {item.categoryName}
+                    </span>
+                  )}
+                  {item.assignees.map((a) => (
+                    <span
+                      key={a.id}
+                      className={`mono text-[11px] uppercase tracking-wide rounded-md px-2 py-1 ${personStyle(a.name)}`}
+                    >
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 

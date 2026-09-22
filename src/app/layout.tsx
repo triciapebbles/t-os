@@ -4,7 +4,7 @@ import Providers from "@/components/Providers";
 import NavBar from "@/components/NavBar";
 
 export const metadata: Metadata = {
-  title: "House Management",
+  title: "tOS",
   description: "Weekly schedule and chores dashboard for the household.",
 };
 
