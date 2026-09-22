@@ -1,0 +1,29 @@
+# Render Blueprint (optional). You can either click "New +" -> "Web Service"
+# in the Render dashboard and configure it by hand (see README.md), or use
+# this file with "New +" -> "Blueprint" to create the service from the repo.
+# Note: this blueprint does not provision the database — create that on
+# Neon separately and paste DATABASE_URL / DIRECT_URL in as env vars.
+services:
+  - type: web
+    name: house-management
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.17.0
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ALLOWED_USERS
+        sync: false

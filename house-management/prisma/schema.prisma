@@ -1,0 +1,128 @@
+// Prisma schema for House Management dashboard
+// Datasource: Neon Postgres (set DATABASE_URL env var)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon: use a pooled connection for the app and an optional direct
+  // connection for migrations, if you split them.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Auth (NextAuth / Auth.js Prisma adapter) ----------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+
+  accounts Account[]
+  sessions Session[]
+
+  // App data
+  createdChores Chore[] @relation("ChoreCreatedBy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------- House Management domain ----------
+
+// A household member who chores can be assigned to. Deliberately separate
+// from `User` (who can log in): a household can have members (kids, a
+// helper, etc.) who never sign in but still show up as assignees.
+model Person {
+  id    String  @id @default(cuid())
+  name  String  @unique
+  color String? // optional hex color for UI badges/avatars
+
+  assignedChores ChoreAssignee[]
+
+  createdAt DateTime @default(now())
+}
+
+model Category {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  color  String? // optional hex color for UI badges
+  chores Chore[]
+
+  createdAt DateTime @default(now())
+}
+
+model Chore {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  // free-text fields carried over from the original Dailies.xlsx sheet
+  frequency   String? // e.g. "once a week", "twice a week", "every 2 weeks"
+  bestDoneOn  String? // e.g. "sunday", "15th of every month"
+  remarks     String?
+
+  durationMinutes Int? // how long the chore takes, in minutes
+
+  assignees ChoreAssignee[]
+
+  createdById String?
+  createdBy   User?   @relation("ChoreCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Explicit join table so a chore can be assigned to multiple people
+// (and so we can extend it later, e.g. per-assignee status).
+model ChoreAssignee {
+  id       String @id @default(cuid())
+  choreId  String
+  personId String
+
+  chore  Chore  @relation(fields: [choreId], references: [id], onDelete: Cascade)
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([choreId, personId])
+}
