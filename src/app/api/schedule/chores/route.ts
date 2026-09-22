@@ -2,60 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getNamedCalendarEvents, type NamedCalendarEvent } from "@/lib/googleCalendar";
-import {
-  parseDateOnly,
-  formatDateOnly,
-  addDaysUTC,
-  weekdayCodeUTC,
-  startOfWeekMondayUTC,
-  zonedDateRangeToUtc,
-} from "@/lib/date";
-
-// Which Google calendars (by display name) feed the "On the calendar"
-// section, merged together. Override on Render with an env var
-// GOOGLE_CALENDAR_NAMES="Name One, Name Two" if these ever change —
-// no code change needed.
-const CALENDAR_NAMES = (process.env.GOOGLE_CALENDAR_NAMES ?? "ztmf,fitness plan,to-do list")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-const WEEKDAY_LABEL: Record<string, string> = {
-  MON: "Mon",
-  TUE: "Tue",
-  WED: "Wed",
-  THU: "Thu",
-  FRI: "Fri",
-  SAT: "Sat",
-  SUN: "Sun",
-};
-
-// The household's two people always get their own column, even on days
-// with no events for them. Any other event creator (a shared invite, a
-// calendar entry made by someone else) gets its own extra column, named
-// after whatever Google tells us about them.
-const KNOWN_OWNERS = ["Tricia", "Zane"];
-
-function normalizeOwnerLabel(raw: string): string {
-  const lower = raw.toLowerCase();
-  const known = KNOWN_OWNERS.find((name) => lower.includes(name.toLowerCase()));
-  return known ?? raw;
-}
-
-function ownerLabelFor(event: NamedCalendarEvent): string {
-  const displayName = event.creator?.displayName?.trim();
-  if (displayName) return normalizeOwnerLabel(displayName);
-
-  const email = event.creator?.email;
-  if (email) {
-    const local = email.split("@")[0].replace(/[._]+/g, " ").trim();
-    const titled = local.replace(/\b\w/g, (c) => c.toUpperCase());
-    return normalizeOwnerLabel(titled || email);
-  }
-
-  return "Unknown";
-}
+import { parseDateOnly, formatDateOnly, addDaysUTC, weekdayCodeUTC, startOfWeekMondayUTC } from "@/lib/date";
 
 type ChoreWithRelations = Awaited<ReturnType<typeof loadChores>>[number];
 
@@ -93,74 +40,23 @@ function shapeSimpleTask(chore: ChoreWithRelations) {
   };
 }
 
+// This is the fast, DB-only half of what used to be /api/schedule/daily:
+// no Google Calendar call at all, just chores/admin/maintenance for the
+// given date. The page fetches this on its own after a checkbox toggle,
+// instead of re-fetching the (slow) calendar data too.
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const userId = (session.user as { id: string }).id;
 
   const { searchParams } = new URL(request.url);
-  const tz = searchParams.get("tz") || "Asia/Singapore";
   const dateParam = searchParams.get("date");
   const today = parseDateOnly(dateParam ?? formatDateOnly(new Date()));
   const dateStr = formatDateOnly(today);
   const weekStart = startOfWeekMondayUTC(today);
   const weekDates = Array.from({ length: 7 }, (_, i) => formatDateOnly(addDaysUTC(weekStart, i)));
 
-  // ---------- calendar events for the whole week (for day-pill counts) ----------
-  const weekRangeUtc = {
-    start: zonedDateRangeToUtc(weekDates[0], tz).start,
-    end: zonedDateRangeToUtc(weekDates[6], tz).end,
-  };
-
-  let weekEvents: Awaited<ReturnType<typeof getNamedCalendarEvents>> = [];
-  let calendarError: string | null = null;
-  try {
-    const events = await getNamedCalendarEvents(
-      userId,
-      CALENDAR_NAMES,
-      weekRangeUtc.start.toISOString(),
-      weekRangeUtc.end.toISOString()
-    );
-    if (events === null) {
-      calendarError = "no_calendar_access";
-    } else {
-      weekEvents = events;
-    }
-  } catch (err) {
-    console.error("Failed to fetch calendar events", err);
-    calendarError = "calendar_fetch_failed";
-  }
-
-  function localDateKey(iso: string | null, allDay: boolean) {
-    if (!iso) return null;
-    if (allDay) return iso.slice(0, 10);
-    return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(iso));
-  }
-
-  const weekDays = weekDates.map((key, i) => {
-    const d = addDaysUTC(weekStart, i);
-    return {
-      date: key,
-      label: WEEKDAY_LABEL[weekdayCodeUTC(d)],
-      eventCount: (weekEvents ?? []).filter((e) => localDateKey(e.start, e.allDay) === key).length,
-    };
-  });
-
-  const todaysEvents = (weekEvents ?? []).filter((e) => localDateKey(e.start, e.allDay) === dateStr);
-
-  // ---------- split today's events into per-person columns by creator ----------
-  const columnsMap = new Map<string, NamedCalendarEvent[]>();
-  for (const owner of KNOWN_OWNERS) columnsMap.set(owner, []);
-  for (const event of todaysEvents) {
-    const owner = ownerLabelFor(event);
-    if (!columnsMap.has(owner)) columnsMap.set(owner, []);
-    columnsMap.get(owner)!.push(event);
-  }
-  const eventColumns = Array.from(columnsMap.entries()).map(([owner, events]) => ({ owner, events }));
-
-  // ---------- chores, with carry-over ----------
   const allChores = await loadChores();
   const dailyChores = allChores.filter((c) => c.kind === "CHORE");
   const completions = await prisma.choreCompletion.findMany({
@@ -211,10 +107,6 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     date: dateStr,
-    weekDays,
-    eventColumns,
-    eventCount: todaysEvents.length,
-    calendarError,
     chores: { due },
     admin,
     maintenance,
