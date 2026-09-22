@@ -1,56 +1,55 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { signOut, useSession } from "next-auth/react";
-
-const links = [
-  { href: "/", label: "Dashboard" },
-  { href: "/schedule", label: "Weekly schedule" },
-  { href: "/chores", label: "Chores" },
-];
+import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
+import { format } from "date-fns";
 
 export default function NavBar() {
-  const pathname = usePathname();
   const { data: session } = useSession();
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000 * 30);
+    return () => clearInterval(id);
+  }, []);
 
   if (!session) return null;
 
+  const offsetHours = now ? -now.getTimezoneOffset() / 60 : 0;
+  const offsetLabel = `GMT${offsetHours >= 0 ? "+" : ""}${offsetHours}`;
+
   return (
-    <header className="bg-brand-50">
-      <div className="mx-auto max-w-5xl px-4 pt-5 flex items-center justify-between flex-wrap gap-3">
-        <nav className="flex items-end gap-2">
-          <span className="mono text-xs tracking-wide uppercase text-brand-500 pb-2 pr-2">
-            🏠 House Management
-          </span>
-          {links.map((link) => {
-            const active = pathname === link.href;
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`mono text-[13px] rounded-b-[9px] px-4 pt-2.5 pb-2 transition-colors ${
-                  active
-                    ? "bg-[#E4EAC6] text-[#5B6B2E]"
-                    : "bg-brand-100 text-brand-500 hover:bg-brand-200"
-                }`}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="flex items-center gap-3 pb-2">
-          <span className="mono text-xs text-brand-500">{session.user?.email}</span>
-          <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="mono text-xs rounded-full border border-brand-200 bg-white px-3 py-1.5 text-brand-600 hover:bg-brand-100"
-          >
-            Sign out
-          </button>
-        </div>
+    <div className="mx-auto max-w-5xl px-4 pt-5 pb-4 flex items-center justify-between flex-wrap gap-3">
+      <nav className="flex items-center gap-2">
+        <span className="mono text-sm rounded-full px-4 py-2 bg-[#E4EAC6] text-[#5B6B2E]">
+          Weekly schedule
+        </span>
+        <span
+          title="Not part of this dashboard yet"
+          className="mono text-sm rounded-full px-4 py-2 bg-brand-100 text-brand-400 cursor-not-allowed select-none"
+        >
+          Today&apos;s fit
+        </span>
+        <span
+          title="Not part of this dashboard yet"
+          className="mono text-sm rounded-full px-4 py-2 bg-brand-100 text-brand-400 cursor-not-allowed select-none"
+        >
+          Feeding the cats
+        </span>
+      </nav>
+
+      <div className="flex items-center gap-2">
+        <span className="mono text-sm rounded-full px-4 py-2 border border-brand-200 bg-white text-brand-700">
+          {now ? format(now, "EEEE, d MMMM") : " "}
+        </span>
+        <span className="mono text-sm rounded-full px-4 py-2 border border-brand-200 bg-white text-brand-700">
+          {now ? `${format(now, "h:mm a")} ${offsetLabel}` : " "}
+        </span>
+        <span className="text-xl leading-none" aria-hidden>
+          🌱
+        </span>
       </div>
-      <div className="border-b border-brand-200" />
-    </header>
+    </div>
   );
 }

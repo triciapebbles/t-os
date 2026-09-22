@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 type Person = { id: string; name: string; color: string | null };
 type Category = { id: string; name: string; color: string | null };
@@ -13,6 +14,8 @@ type Chore = {
   bestDoneOn: string | null;
   remarks: string | null;
   durationMinutes: number | null;
+  daysOfWeek: string[];
+  flexible: boolean;
   assignees: { person: Person }[];
 };
 
@@ -27,6 +30,8 @@ type FormState = {
   remarks: string;
   durationMinutes: string;
   personIds: string[];
+  daysOfWeek: string[];
+  flexible: boolean;
 };
 
 const emptyForm: FormState = {
@@ -39,13 +44,33 @@ const emptyForm: FormState = {
   remarks: "",
   durationMinutes: "",
   personIds: [],
+  daysOfWeek: [],
+  flexible: false,
 };
+
+const WEEKDAYS: { code: string; label: string }[] = [
+  { code: "MON", label: "Mon" },
+  { code: "TUE", label: "Tue" },
+  { code: "WED", label: "Wed" },
+  { code: "THU", label: "Thu" },
+  { code: "FRI", label: "Fri" },
+  { code: "SAT", label: "Sat" },
+  { code: "SUN", label: "Sun" },
+];
 
 function formatDuration(minutes: number | null) {
   if (!minutes) return "—";
   if (minutes < 60) return `${minutes} min`;
   const hrs = minutes / 60;
   return `${Number.isInteger(hrs) ? hrs : hrs.toFixed(1)} hr${hrs !== 1 ? "s" : ""}`;
+}
+
+function scheduleLabel(chore: Pick<Chore, "flexible" | "daysOfWeek">) {
+  if (chore.flexible) return "If there's time";
+  if (chore.daysOfWeek.length === 0) return "Daily";
+  return chore.daysOfWeek
+    .map((code) => WEEKDAYS.find((w) => w.code === code)?.label ?? code)
+    .join(" ");
 }
 
 // category pill colors — matches the household's original chores board
@@ -121,6 +146,8 @@ export default function ChoresPage() {
       remarks: chore.remarks ?? "",
       durationMinutes: chore.durationMinutes ? String(chore.durationMinutes) : "",
       personIds: chore.assignees.map((a) => a.person.id),
+      daysOfWeek: chore.daysOfWeek,
+      flexible: chore.flexible,
     });
   }
 
@@ -138,6 +165,8 @@ export default function ChoresPage() {
       remarks: form.remarks || undefined,
       durationMinutes: form.durationMinutes ? Number(form.durationMinutes) : undefined,
       personIds: form.personIds,
+      daysOfWeek: form.flexible ? [] : form.daysOfWeek,
+      flexible: form.flexible,
     };
 
     if (form.id) {
@@ -189,10 +218,25 @@ export default function ChoresPage() {
     });
   }
 
+  function toggleDay(code: string) {
+    if (!form) return;
+    setForm({
+      ...form,
+      daysOfWeek: form.daysOfWeek.includes(code)
+        ? form.daysOfWeek.filter((c) => c !== code)
+        : [...form.daysOfWeek, code],
+    });
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-semibold text-brand-900">Chores</h1>
+        <div>
+          <Link href="/" className="mono text-xs text-brand-400 hover:text-brand-600">
+            ← Back to weekly schedule
+          </Link>
+          <h1 className="text-2xl font-semibold text-brand-900 mt-1">Manage chores</h1>
+        </div>
         <div className="flex items-center gap-2">
           <select
             value={categoryFilter}
@@ -246,9 +290,9 @@ export default function ChoresPage() {
                   </div>
                   {chore.description && <p className="text-sm text-brand-500 -mt-1">{chore.description}</p>}
                   <div className="mono flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-brand-500">
-                    {chore.frequency && <span>{chore.frequency}</span>}
+                    <span>{scheduleLabel(chore)}</span>
                     <span>{formatDuration(chore.durationMinutes)}</span>
-                    {chore.bestDoneOn && <span>{chore.bestDoneOn}</span>}
+                    {chore.frequency && <span>{chore.frequency}</span>}
                   </div>
                   {chore.assignees.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
@@ -335,6 +379,41 @@ export default function ChoresPage() {
                   className="mt-1 w-full rounded-md border border-brand-300 px-3 py-1.5 text-sm"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-brand-700">When is this due?</label>
+              <label className="mt-1 flex items-center gap-2 text-sm text-brand-600">
+                <input
+                  type="checkbox"
+                  checked={form.flexible}
+                  onChange={(e) => setForm({ ...form, flexible: e.target.checked })}
+                />
+                Flexible — &quot;if there&apos;s time&quot;, no fixed day
+              </label>
+              {!form.flexible && (
+                <>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {WEEKDAYS.map((day) => (
+                      <button
+                        type="button"
+                        key={day.code}
+                        onClick={() => toggleDay(day.code)}
+                        className={`mono text-xs rounded-full px-3 py-1 border ${
+                          form.daysOfWeek.includes(day.code)
+                            ? "bg-brand-600 text-white border-brand-600"
+                            : "bg-white text-brand-700 border-brand-300"
+                        }`}
+                      >
+                        {day.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-brand-400 mt-1">
+                    Leave all days unselected for a chore that&apos;s due every day.
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
