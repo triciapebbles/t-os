@@ -46,10 +46,16 @@ type EventColumn = { owner: string; events: CalEvent[] };
 type CalendarData = {
   date: string;
   weekDays: WeekDay[];
+  eventColumnsByDate: Record<string, EventColumn[]>;
   eventColumns: EventColumn[];
   eventCount: number;
   calendarError: string | null;
 };
+
+// How often we re-poll Google Calendar in the background. Switching the
+// selected day tab never triggers a fetch — see the comment on
+// `loadCalendar` below.
+const CALENDAR_REFRESH_MS = 60 * 60 * 1000;
 type ChoresData = {
   date: string;
   chores: { due: ChoreItem[] };
@@ -107,11 +113,17 @@ export default function HomePage() {
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const today = useMemo(() => todayStr(), []);
 
-  const loadCalendar = useCallback(async (date: string) => {
+  // The Google-Calendar-backed half. This fetches the *whole current
+  // week* in one call and is deliberately decoupled from `selectedDate`:
+  // it only runs on mount and on a slow interval (CALENDAR_REFRESH_MS)
+  // below, never when the person just clicks a different day tab —
+  // switching days re-slices the already-fetched week client-side (see
+  // `dayCalendar` below) instead of hitting Google again.
+  const loadCalendar = useCallback(async () => {
     setCalendarLoading(true);
     setCalendarErrorMsg(null);
     try {
-      const res = await fetch(`/api/schedule/calendar?date=${date}&tz=${encodeURIComponent(tz)}`);
+      const res = await fetch(`/api/schedule/calendar?date=${todayStr()}&tz=${encodeURIComponent(tz)}`);
       if (!res.ok) throw new Error("Failed to load calendar");
       const json: CalendarData = await res.json();
       setCalendar(json);
@@ -140,13 +152,27 @@ export default function HomePage() {
     }
   }, []);
 
+  // Fetch once on mount/refresh, then again every CALENDAR_REFRESH_MS —
+  // not on every `selectedDate` change (see `loadCalendar` above).
   useEffect(() => {
-    loadCalendar(selectedDate);
-  }, [selectedDate, loadCalendar]);
+    loadCalendar();
+    const interval = setInterval(loadCalendar, CALENDAR_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [loadCalendar]);
 
   useEffect(() => {
     loadChores(selectedDate);
   }, [selectedDate, loadChores]);
+
+  // Slice the already-fetched week down to whichever day is selected.
+  // Falls back gracefully if the selected day isn't in the cached week
+  // (e.g. right after midnight, before the next hourly refresh lands).
+  const dayCalendar = useMemo(() => {
+    if (!calendar) return null;
+    const eventColumns = calendar.eventColumnsByDate[selectedDate] ?? calendar.eventColumns;
+    const eventCount = calendar.weekDays.find((d) => d.date === selectedDate)?.eventCount ?? eventColumns.reduce((sum, c) => sum + c.events.length, 0);
+    return { eventColumns, eventCount };
+  }, [calendar, selectedDate]);
 
   // Optimistic: flip the checkbox instantly, fire the save in the
   // background, and only touch the network again if it actually fails.
@@ -205,6 +231,7 @@ export default function HomePage() {
         {calendar?.weekDays.map((day) => {
           const active = day.date === selectedDate;
           const isToday = day.date === today;
+          const dayOfMonth = format(parseISO(day.date), "d");
           return (
             <button
               key={day.date}
@@ -217,7 +244,7 @@ export default function HomePage() {
             >
               <span>{day.label}</span>
               {isToday && <span className={active ? "text-white" : "text-brand-900"}>•</span>}
-              <span className={active ? "text-white/60" : "text-brand-400"}>{day.eventCount || ""}</span>
+              <span className={active ? "text-white/60" : "text-brand-400"}>{dayOfMonth}</span>
             </button>
           );
         })}
@@ -234,14 +261,14 @@ export default function HomePage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-brand-900">On the calendar</h1>
-          {calendar && <span className="mono text-sm text-brand-400">{calendar.eventCount} events</span>}
+          {dayCalendar && <span className="mono text-sm text-brand-400">{dayCalendar.eventCount} events</span>}
         </div>
 
-        {calendarLoading && <p className="mono text-sm text-brand-500">Loading…</p>}
+        {calendarLoading && !calendar && <p className="mono text-sm text-brand-500">Loading…</p>}
 
-        {!calendarLoading && (
+        {(!calendarLoading || calendar) && (
           <div className="grid sm:grid-cols-2 gap-3">
-            {calendar?.eventColumns.map((column) => (
+            {dayCalendar?.eventColumns.map((column) => (
               <div key={column.owner} className="rounded-2xl bg-brand-100/60 p-4 space-y-2">
                 <span
                   className={`mono inline-block text-[11px] tracking-wide uppercase px-2.5 py-1 rounded-md ${personStyle(column.owner)}`}
