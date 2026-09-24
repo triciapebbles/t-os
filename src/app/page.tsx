@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 
@@ -38,12 +38,20 @@ type SimpleTask = {
   done: boolean;
 };
 type EventColumn = { owner: string; events: CalEvent[] };
-type DailyData = {
+
+// Split into two independent pieces of state, backed by two independent
+// endpoints. `calendar` is the slow, Google-Calendar-backed half; `chores`
+// is the fast, DB-only half. Ticking a checkbox only ever touches
+// `chores` — it never re-triggers a calendar fetch.
+type CalendarData = {
   date: string;
   weekDays: WeekDay[];
   eventColumns: EventColumn[];
   eventCount: number;
   calendarError: string | null;
+};
+type ChoresData = {
+  date: string;
   chores: { due: ChoreItem[] };
   admin: SimpleTask[];
   maintenance: SimpleTask[];
@@ -79,69 +87,122 @@ function personStyle(name: string) {
 
 export default function HomePage() {
   const [selectedDate, setSelectedDate] = useState<string>(todayStr());
-  const [data, setData] = useState<DailyData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [calendar, setCalendar] = useState<CalendarData | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [calendarErrorMsg, setCalendarErrorMsg] = useState<string | null>(null);
+
+  const [chores, setChores] = useState<ChoresData | null>(null);
+  const [choresLoading, setChoresLoading] = useState(true);
+  const [choresErrorMsg, setChoresErrorMsg] = useState<string | null>(null);
+
+  // Per-item "this toggle failed, we reverted it" message — separate from
+  // the load error above so a flaky save doesn't blow away the whole list.
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  // Guards against a slow response from an earlier date/toggle landing
+  // after a newer one and clobbering fresher state.
+  const choresRequestId = useRef(0);
 
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const today = useMemo(() => todayStr(), []);
 
-  async function load(date: string) {
-    setLoading(true);
-    setError(null);
+  const loadCalendar = useCallback(async (date: string) => {
+    setCalendarLoading(true);
+    setCalendarErrorMsg(null);
     try {
-      const res = await fetch(`/api/schedule/daily?date=${date}&tz=${encodeURIComponent(tz)}`);
-      if (!res.ok) throw new Error("Failed to load schedule");
-      const json: DailyData = await res.json();
-      setData(json);
+      const res = await fetch(`/api/schedule/calendar?date=${date}&tz=${encodeURIComponent(tz)}`);
+      if (!res.ok) throw new Error("Failed to load calendar");
+      const json: CalendarData = await res.json();
+      setCalendar(json);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setCalendarErrorMsg(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setLoading(false);
+      setCalendarLoading(false);
     }
-  }
+  }, [tz]);
+
+  const loadChores = useCallback(async (date: string) => {
+    const requestId = ++choresRequestId.current;
+    setChoresLoading(true);
+    setChoresErrorMsg(null);
+    try {
+      const res = await fetch(`/api/schedule/chores?date=${date}`);
+      if (!res.ok) throw new Error("Failed to load chores");
+      const json: ChoresData = await res.json();
+      if (requestId === choresRequestId.current) setChores(json);
+    } catch (err) {
+      if (requestId === choresRequestId.current) {
+        setChoresErrorMsg(err instanceof Error ? err.message : "Something went wrong");
+      }
+    } finally {
+      if (requestId === choresRequestId.current) setChoresLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    load(selectedDate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDate]);
+    loadCalendar(selectedDate);
+  }, [selectedDate, loadCalendar]);
 
+  useEffect(() => {
+    loadChores(selectedDate);
+  }, [selectedDate, loadChores]);
+
+  // Optimistic: flip the checkbox instantly, fire the save in the
+  // background, and only touch the network again if it actually fails.
   async function toggleChore(item: ChoreItem) {
-    setBusyId(item.id);
     const date = item.carriedOver ? item.originalDate! : selectedDate;
+    const nextCompleted = !item.completed;
+    setToggleError(null);
+    setChores((prev) =>
+      prev
+        ? { ...prev, chores: { due: prev.chores.due.map((c) => (c.id === item.id ? { ...c, completed: nextCompleted } : c)) } }
+        : prev
+    );
     try {
-      await fetch("/api/chores/complete", {
+      const res = await fetch("/api/chores/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ choreId: item.id, date, completed: !item.completed }),
+        body: JSON.stringify({ choreId: item.id, date, completed: nextCompleted }),
       });
-      await load(selectedDate);
-    } finally {
-      setBusyId(null);
+      if (!res.ok) throw new Error("Save failed");
+    } catch {
+      setToggleError(`Couldn't save "${item.name}" — reverted.`);
+      setChores((prev) =>
+        prev
+          ? { ...prev, chores: { due: prev.chores.due.map((c) => (c.id === item.id ? { ...c, completed: !nextCompleted } : c)) } }
+          : prev
+      );
     }
   }
 
-  async function toggleTask(item: SimpleTask) {
-    setBusyId(item.id);
+  async function toggleTask(item: SimpleTask, section: "admin" | "maintenance") {
+    const nextDone = !item.done;
+    setToggleError(null);
+    setChores((prev) =>
+      prev ? { ...prev, [section]: prev[section].map((t) => (t.id === item.id ? { ...t, done: nextDone } : t)) } : prev
+    );
     try {
-      await fetch(`/api/chores/${item.id}`, {
+      const res = await fetch(`/api/chores/${item.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ done: !item.done }),
+        body: JSON.stringify({ done: nextDone }),
       });
-      await load(selectedDate);
-    } finally {
-      setBusyId(null);
+      if (!res.ok) throw new Error("Save failed");
+    } catch {
+      setToggleError(`Couldn't save "${item.name}" — reverted.`);
+      setChores((prev) =>
+        prev ? { ...prev, [section]: prev[section].map((t) => (t.id === item.id ? { ...t, done: !nextDone } : t)) } : prev
+      );
     }
   }
 
-  const selectedLabel = data ? format(parseISO(data.date), "EEEE") : "";
+  const selectedLabel = chores ? format(parseISO(chores.date), "EEEE") : "";
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
-        {data?.weekDays.map((day) => {
+        {calendar?.weekDays.map((day) => {
           const active = day.date === selectedDate;
           const isToday = day.date === today;
           return (
@@ -162,9 +223,9 @@ export default function HomePage() {
         })}
       </div>
 
-      {data?.calendarError && (
+      {calendar?.calendarError && (
         <div className="rounded-2xl border border-flag/40 bg-flag-soft p-4 text-flag text-sm">
-          {data.calendarError === "no_calendar_access"
+          {calendar.calendarError === "no_calendar_access"
             ? "Google Calendar access hasn't been granted yet. Sign out and sign back in, making sure to approve the calendar permission."
             : "Could not fetch calendar events."}
         </div>
@@ -173,14 +234,14 @@ export default function HomePage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-brand-900">On the calendar</h1>
-          {data && <span className="mono text-sm text-brand-400">{data.eventCount} events</span>}
+          {calendar && <span className="mono text-sm text-brand-400">{calendar.eventCount} events</span>}
         </div>
 
-        {loading && <p className="mono text-sm text-brand-500">Loading…</p>}
+        {calendarLoading && <p className="mono text-sm text-brand-500">Loading…</p>}
 
-        {!loading && (
+        {!calendarLoading && (
           <div className="grid sm:grid-cols-2 gap-3">
-            {data?.eventColumns.map((column) => (
+            {calendar?.eventColumns.map((column) => (
               <div key={column.owner} className="rounded-2xl bg-brand-100/60 p-4 space-y-2">
                 <span
                   className={`mono inline-block text-[11px] tracking-wide uppercase px-2.5 py-1 rounded-md ${personStyle(column.owner)}`}
@@ -223,19 +284,19 @@ export default function HomePage() {
               Manage chores →
             </Link>
           </div>
-          {data && <span className="mono text-sm text-brand-400">{data.chores.due.length} chores</span>}
+          {chores && <span className="mono text-sm text-brand-400">{chores.chores.due.length} chores</span>}
         </div>
 
         <div className="divide-y divide-brand-100">
-          {!loading && data?.chores.due.length === 0 && (
+          {!choresLoading && chores?.chores.due.length === 0 && (
             <p className="text-sm text-brand-400 py-3">Nothing due — enjoy the day off.</p>
           )}
-          {data?.chores.due.map((item) => (
+          {choresLoading && !chores && <p className="mono text-sm text-brand-500 py-3">Loading…</p>}
+          {chores?.chores.due.map((item) => (
             <div key={`${item.id}-${item.carriedOver ? item.originalDate : "today"}`} className="flex items-center gap-3 py-3">
               <button
                 onClick={() => toggleChore(item)}
-                disabled={busyId === item.id}
-                className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
+                className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
                   item.completed ? "bg-done border-done text-white" : "border-brand-300 bg-white"
                 }`}
                 aria-label={item.completed ? "Mark not done" : "Mark done"}
@@ -283,18 +344,17 @@ export default function HomePage() {
         <div className="rounded-3xl border border-brand-200 bg-white p-6 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-brand-900">Admin</h2>
-            {data && <span className="mono text-sm text-brand-400">{data.admin.length}</span>}
+            {chores && <span className="mono text-sm text-brand-400">{chores.admin.length}</span>}
           </div>
           <div className="divide-y divide-brand-100">
-            {!loading && data?.admin.length === 0 && (
+            {!choresLoading && chores?.admin.length === 0 && (
               <p className="text-sm text-brand-400 py-3">Nothing here.</p>
             )}
-            {data?.admin.map((item) => (
+            {chores?.admin.map((item) => (
               <div key={item.id} className="flex items-center gap-3 py-3">
                 <button
-                  onClick={() => toggleTask(item)}
-                  disabled={busyId === item.id}
-                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
+                  onClick={() => toggleTask(item, "admin")}
+                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
                     item.done ? "bg-done border-done text-white" : "border-brand-300 bg-white"
                   }`}
                   aria-label={item.done ? "Mark not done" : "Mark done"}
@@ -328,18 +388,17 @@ export default function HomePage() {
         <div className="rounded-3xl border border-brand-200 bg-white p-6 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-brand-900">Maintenance Needed</h2>
-            {data && <span className="mono text-sm text-brand-400">{data.maintenance.length}</span>}
+            {chores && <span className="mono text-sm text-brand-400">{chores.maintenance.length}</span>}
           </div>
           <div className="divide-y divide-brand-100">
-            {!loading && data?.maintenance.length === 0 && (
+            {!choresLoading && chores?.maintenance.length === 0 && (
               <p className="text-sm text-brand-400 py-3">Nothing here.</p>
             )}
-            {data?.maintenance.map((item) => (
+            {chores?.maintenance.map((item) => (
               <div key={item.id} className="flex items-center gap-3 py-3">
                 <button
-                  onClick={() => toggleTask(item)}
-                  disabled={busyId === item.id}
-                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${
+                  onClick={() => toggleTask(item, "maintenance")}
+                  className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
                     item.done ? "bg-done border-done text-white" : "border-brand-300 bg-white"
                   }`}
                   aria-label={item.done ? "Mark not done" : "Mark done"}
@@ -376,7 +435,9 @@ export default function HomePage() {
         </div>
       </div>
 
-      {error && <p className="text-sm text-flag">{error}</p>}
+      {(calendarErrorMsg || choresErrorMsg || toggleError) && (
+        <p className="text-sm text-flag">{toggleError ?? choresErrorMsg ?? calendarErrorMsg}</p>
+      )}
     </div>
   );
 }
