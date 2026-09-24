@@ -52,9 +52,12 @@ function ownerLabelFor(event: NamedCalendarEvent): string {
 // This is the slow, network-bound half of what used to be
 // /api/schedule/daily: it talks to Google Calendar (a calendar-list
 // lookup plus an events.list call per matched calendar) on every
-// request. It's now its own endpoint, fetched once per date/timezone
-// change and never re-fetched just because a chore checkbox was
-// clicked — see /api/schedule/chores for the fast, DB-only half.
+// request. It fetches the *entire* week's events in one go and hands
+// back a per-day breakdown, so the client only needs to call this once
+// (on load, and then on a slow timer/refresh — see page.tsx) rather than
+// every time the selected day tab changes. Ticking a chore checkbox
+// never touches this endpoint either — see /api/schedule/chores for the
+// fast, DB-only half.
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
@@ -100,6 +103,17 @@ export async function GET(request: Request) {
     return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(iso));
   }
 
+  function columnsFor(events: NamedCalendarEvent[]) {
+    const columnsMap = new Map<string, NamedCalendarEvent[]>();
+    for (const owner of KNOWN_OWNERS) columnsMap.set(owner, []);
+    for (const event of events) {
+      const owner = ownerLabelFor(event);
+      if (!columnsMap.has(owner)) columnsMap.set(owner, []);
+      columnsMap.get(owner)!.push(event);
+    }
+    return Array.from(columnsMap.entries()).map(([owner, events]) => ({ owner, events }));
+  }
+
   const weekDays = weekDates.map((key, i) => {
     const d = addDaysUTC(weekStart, i);
     return {
@@ -109,21 +123,23 @@ export async function GET(request: Request) {
     };
   });
 
-  const todaysEvents = (weekEvents ?? []).filter((e) => localDateKey(e.start, e.allDay) === dateStr);
-
-  const columnsMap = new Map<string, NamedCalendarEvent[]>();
-  for (const owner of KNOWN_OWNERS) columnsMap.set(owner, []);
-  for (const event of todaysEvents) {
-    const owner = ownerLabelFor(event);
-    if (!columnsMap.has(owner)) columnsMap.set(owner, []);
-    columnsMap.get(owner)!.push(event);
+  // Per-day event columns for the whole week, keyed by date, so the
+  // client can switch the selected day locally without another fetch.
+  const eventColumnsByDate: Record<string, ReturnType<typeof columnsFor>> = {};
+  for (const key of weekDates) {
+    const dayEvents = (weekEvents ?? []).filter((e) => localDateKey(e.start, e.allDay) === key);
+    eventColumnsByDate[key] = columnsFor(dayEvents);
   }
-  const eventColumns = Array.from(columnsMap.entries()).map(([owner, events]) => ({ owner, events }));
+
+  const todaysEvents = (weekEvents ?? []).filter((e) => localDateKey(e.start, e.allDay) === dateStr);
 
   return NextResponse.json({
     date: dateStr,
     weekDays,
-    eventColumns,
+    eventColumnsByDate,
+    // Kept for the initially-requested date, mainly so a stale client
+    // that hasn't picked up the byDate map yet still renders something.
+    eventColumns: eventColumnsByDate[dateStr] ?? columnsFor(todaysEvents),
     eventCount: todaysEvents.length,
     calendarError,
   });
