@@ -1,5 +1,5 @@
-// Runs once when the Next.js server process starts (see next.config.js —
-// experimental.instrumentationHook). We use it to keep the Render service
+// Runs once when the Next.js server process starts (Next.js 15 finds this
+// file on its own; no config needed). We use it to keep the Render service
 // awake by having it ping its own /api/health endpoint on a timer, instead
 // of relying on someone opening the page.
 //

@@ -8,11 +8,17 @@ services:
     name: house-management
     runtime: node
     plan: starter
+    # After committing package-lock.json (run `npm install` once locally and commit the file), change this to
+    # `npm ci && npm run build` so every deploy installs exactly the versions that were tested.
     buildCommand: npm install && npm run build
     startCommand: npm run start
     envVars:
+      # Node 20 is end of life and misses the October 2026 security fixes (the Brotli RCE, the TLS hostname
+      # checks, and the updated certificate list for the eMudhra compromise). 22.23.4 or later in the 22 line.
+      # If this service was created by hand, this variable lives in the Render dashboard (Environment) and
+      # must be changed there too: a Dashboard value overrides this file.
       - key: NODE_VERSION
-        value: 20.17.0
+        value: 22.23.4
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

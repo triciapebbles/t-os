@@ -9,7 +9,11 @@ async function requireSession() {
   return session;
 }
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
+// Next.js 15: a route's `params` is a promise, so it is awaited before use.
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function PUT(request: Request, { params }: RouteContext) {
+  const { id } = await params;
   const session = await requireSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -56,23 +60,23 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     resolvedCategoryId = category.id;
   }
 
-  const existing = await prisma.chore.findUnique({ where: { id: params.id } });
+  const existing = await prisma.chore.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const chore = await prisma.$transaction(async (tx) => {
     if (personIds) {
-      await tx.choreAssignee.deleteMany({ where: { choreId: params.id } });
+      await tx.choreAssignee.deleteMany({ where: { choreId: id } });
       if (personIds.length > 0) {
         await tx.choreAssignee.createMany({
-          data: personIds.map((personId) => ({ choreId: params.id, personId })),
+          data: personIds.map((personId) => ({ choreId: id, personId })),
         });
       }
     }
 
     return tx.chore.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         name,
         description,
@@ -95,10 +99,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   return NextResponse.json(chore);
 }
 
-export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_request: Request, { params }: RouteContext) {
+  const { id } = await params;
   const session = await requireSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await prisma.chore.delete({ where: { id: params.id } });
+  await prisma.chore.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

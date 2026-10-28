@@ -5,7 +5,7 @@ a weekly schedule pulled from Google Calendar, and a chores list (seeded
 from the household's `Dailies.xlsx`) that anyone signed in can add to,
 edit, assign, and delete.
 
-**Stack:** Next.js 14 (App Router) + TypeScript, Auth.js/NextAuth (Google
+**Stack:** Next.js 15 (App Router) + TypeScript, Auth.js/NextAuth (Google
 OAuth), Prisma ORM, Postgres on [Neon](https://neon.tech), hosted on
 [Render](https://render.com), code on GitHub.
 
@@ -85,7 +85,7 @@ Keep this tab open — you'll paste both strings into Render in step 5.
    - **Name:** `house-management` (this becomes part of your URL:
      `https://house-management.onrender.com`).
    - **Runtime:** Node.
-   - **Build Command:** `npm install && npm run build`
+   - **Build Command:** `npm install && npm run build` (after committing `package-lock.json`, use `npm ci && npm run build`)
    - **Start Command:** `npm run start`
    - **Instance type:** Starter is enough for a household dashboard.
 4. Don't click "Create Web Service" yet — add the environment variables
@@ -114,7 +114,7 @@ On the service's **Environment** tab, add:
 | `GOOGLE_CLIENT_ID` | From step 3 |
 | `GOOGLE_CLIENT_SECRET` | From step 3 |
 | `ALLOWED_USERS` | Comma-separated Google emails allowed to log in, e.g. `you@gmail.com,partner@gmail.com` |
-| `NODE_VERSION` | `20.17.0` (or any Node 20.x) |
+| `NODE_VERSION` | `22.23.4` (or a later 22.x). Older versions miss security fixes, and the build refuses them (`.npmrc`, `engines`) |
 
 Save, and Render will trigger a deploy. If you created the OAuth client
 before knowing the final Render URL, go back to Google Cloud Console now
